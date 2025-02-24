@@ -19,6 +19,9 @@ For each queuing policy, the simulation outputs several key metrics:
 This simulation program models a multi-service station queuing system where customers are assigned to different service stations based on predefined rules. The system consists of five service stations: a single queue that processes up to 15 customers sequentially, a round robin queue that accepts exactly 5 customers in each batch, a shortest queue that is prioritized when its size is the smallest among all stations, and two additional regular queues that receive customers based on overall system load. New customers are generated randomly each round, and the system dynamically calculates and displays estimated waiting times. Additionally, the program tracks the frequency with which each station is selected as the “next quickest” option, offering insights into the efficiency of the various queue assignment strategies.\
 The purpose of this simulation is to serve as an experiment tool for studying queue management algorithms and to simulate a real life station service efficiency. By simulating random customer arrivals and variable service durations, the program enables users to observe how different assignment rules affect overall system performance. This simulation not only demonstrates the practical application of data structures and algorithms in a real-world scenario but also provides a platform for experimenting with various queuing policies to determine which approaches yield the most efficient service under different load conditions.
 
+## Summary of Simulation
+Read in [Section 'Simulation Analysis Report'] (https://github.com/Livia-1212/ServiceStationSimulation/blob/33caaee6b109edd349dc185673980717ba51fe27/Simulation%20Analysis%20-%20Weiyu%20Li.pdf)
+
 ## Installation
 
 1. **Prerequisites:**  
