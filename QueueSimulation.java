@@ -1,14 +1,16 @@
 import java.util.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
+// Represents a time value.
 class TimeType {
     int hours, minutes, seconds;
-
+    
     public TimeType(int h, int m, int s) {
         this.hours = h;
         this.minutes = m;
         this.seconds = s;
     }
-
+    
     public static TimeType randomTime() {
         Random rand = new Random();
         int h = rand.nextInt(24);
@@ -16,56 +18,76 @@ class TimeType {
         int s = rand.nextInt(60);
         return new TimeType(h, m, s);
     }
-
+    
+    // Returns a new TimeType by adding minutes.
+    public static TimeType addMinutes(TimeType t, int minutesToAdd) {
+        int totalMinutes = t.hours * 60 + t.minutes + minutesToAdd;
+        int newHours = (totalMinutes / 60) % 24;
+        int newMinutes = totalMinutes % 60;
+        return new TimeType(newHours, newMinutes, t.seconds);
+    }
+    
     @Override
     public String toString() {
         return String.format("%02d:%02d:%02d", hours, minutes, seconds);
     }
 }
 
+// Represents a duration in minutes.
 class DurationType {
-    int duration; // in minutes
-
+    int duration;
+    
     public DurationType(int d) {
         this.duration = d;
     }
-
-    public static DurationType randomSimulationDuration() {
-        Random rand = new Random();
-        int d = rand.nextInt(15) + 1;
-        return new DurationType(d);
-    }
-
-    // Generate a random service duration between 1 and 10 minutes (ensuring at
-    // least 1 minute)
-    public static DurationType randomServiceDuration() {
+    
+    // Returns a random round duration between 1 and 10 minutes.
+    public static DurationType randomRoundDuration() {
         Random rand = new Random();
         int d = rand.nextInt(10) + 1;
         return new DurationType(d);
     }
+    
+    // Returns a random simulation total duration between 30 and 120 minutes.
+    public static DurationType randomSimulationDuration() {
+        Random rand = new Random();
+        int d = rand.nextInt(91) + 30;
+        return new DurationType(d);
+    }
+    
+    // Returns a random service duration between 1 and (2*averageServiceRate - 1) minutes.
+    public static DurationType randomServiceDuration(int averageServiceRate) {
+        Random rand = new Random();
+        int lower = 1;
+        int upper = 2 * averageServiceRate - 1;
+        int d = lower + rand.nextInt(upper - lower + 1);
+        return new DurationType(d);
+    }
 }
 
+// Represents a customer.
 class CustomerType {
     int ID;
     TimeType arrivalT;
-    DurationType serviceT; // actual service duration (random 1-10 minutes)
-    DurationType waitingTime; // base waiting time (set to 5 minutes for display)
+    DurationType serviceT;   // actual service duration
+    DurationType waitingTime; // fixed waiting time (5 minutes)
     int queueAssigned;
 }
 
+// Represents a service station.
 class ServiceStationType {
     String name;
     Queue<CustomerType> queue;
-    int numbersOfCustomers; // for tracking purposes
+    int numbersOfCustomers;
     TimeType arrivalTime;
-    DurationType waitingTime; // base waiting time for display
+    DurationType waitingTime; // base waiting time (5 minutes)
     DurationType serviceTime; // fixed average service rate (5 minutes)
     boolean isBusy;
-    int totalServiceTime; // additional statistics if needed
-
+    int totalServiceTime;
+    
     ServiceStationType(String name) {
         this.name = name;
-        this.queue = new LinkedList<>();
+        this.queue = new ConcurrentLinkedQueue<>();
         this.numbersOfCustomers = 0;
         this.arrivalTime = TimeType.randomTime();
         this.waitingTime = new DurationType(5);
@@ -73,59 +95,85 @@ class ServiceStationType {
         this.isBusy = false;
         this.totalServiceTime = 0;
     }
-
-    // Sum the service durations of all waiting customers.
+    
+    // Total waiting time = (# customers in queue * 5 minutes).
     public int getTotalWaitingTime() {
-        int total = 0;
-        for (CustomerType c : queue) {
-            total += c.serviceT.duration;
-        }
-        return total;
+        return queue.size() * 5;
     }
-
-    // For display: if this is the RoundRobinQueue, return the maximum service
-    // duration among waiting customers;
-    // otherwise, return the sum.
+    
     public int getDisplayWaitingTime() {
-        if (this.name.equals("RoundRobinQueue")) {
-            int max = 0;
-            for (CustomerType c : queue) {
-                if (c.serviceT.duration > max)
-                    max = c.serviceT.duration;
+        return getTotalWaitingTime();
+    }
+}
+
+// Each service station runs in its own thread processing customers.
+class ServiceStationThread extends Thread {
+    ServiceStationType station;
+    int processingDelay; // milliseconds per customer
+    
+    public ServiceStationThread(ServiceStationType station, int delay) {
+        this.station = station;
+        this.processingDelay = delay;
+    }
+    
+    public void run() {
+        while (!Thread.currentThread().isInterrupted()) {
+            if (!station.queue.isEmpty()) {
+                station.queue.poll();
+                station.numbersOfCustomers = Math.max(0, station.numbersOfCustomers - 1);
+                try {
+                    Thread.sleep(processingDelay);
+                } catch (InterruptedException e) {
+                    break;
+                }
+            } else {
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    break;
+                }
             }
-            return max;
-        } else {
-            return getTotalWaitingTime();
         }
     }
 }
 
+// Main simulation class.
 public class QueueSimulation {
     static List<ServiceStationType> serviceStations = Arrays.asList(
-            new ServiceStationType("SingleQueue"),
-            new ServiceStationType("RoundRobinQueue"),
-            new ServiceStationType("ShortestQueue"),
-            new ServiceStationType("RegularQ1"),
-            new ServiceStationType("RegularQ2"));
-
-    static int simulationTime = 1, ID = 1;
-    // totalCustomerWaiting reflects the initial batch size (for display only).
-    static int totalCustomerWaiting = new Random().nextInt(15) + 1;
+        new ServiceStationType("SingleQueue"),
+        new ServiceStationType("RoundRobinQueue"),
+        new ServiceStationType("ShortestQueue"),
+        new ServiceStationType("RegularQ1"),
+        new ServiceStationType("RegularQ2")
+    );
+    
+    static int simulationRound = 1, ID = 1;
+    // Total simulation duration (overall simulation, not per round) between 30 and 120 minutes.
+    static DurationType totalSimulationDuration = DurationType.randomSimulationDuration();
+    static int totalDurationInput = totalSimulationDuration.duration;
+    // Initial waiting customers: average ~1 every 2 minutes.
+    static int totalCustomerWaiting;
+    // Average Service Rate (S) is now tuned to be much higher (between 20 and 40 minutes) to crowd the system.
+    static int averageServiceRate;
+    
     static TimeType arrivalRate = TimeType.randomTime();
-
     static Scanner scanner = new Scanner(System.in);
-
-    // Frequency map to track next quickest station selection.
+    
+    // Track accumulated simulation time (in minutes) and current customer arrival time.
+    static int accumulatedSimTime = 0;
+    static TimeType currentArrivalTime;
+    
+    // Frequency map for next quickest station selection.
     static Map<String, Integer> nextQuickestFrequency = new HashMap<>();
-
+    
     // Helper: get a station by its name.
     public static ServiceStationType getStation(String name) {
         return serviceStations.stream()
                 .filter(s -> s.name.equals(name))
                 .findFirst().get();
     }
-
-    // Helper: convert a queue of customers to a string of their IDs.
+    
+    // Helper: convert a queue of customer IDs to a string.
     public static String getQueueCustomerIDs(Queue<CustomerType> queue) {
         StringBuilder sb = new StringBuilder();
         for (CustomerType c : queue) {
@@ -133,48 +181,51 @@ public class QueueSimulation {
         }
         return sb.toString().trim();
     }
-
-    // Estimated waiting time if a new customer were to join.
-    // For RoundRobinQueue: if empty, assume 5 minutes; if not, return a high value.
-    // For others, return the sum of service durations.
-    public static int estimatedWaitingTime(ServiceStationType station) {
-        if (station.name.equals("RoundRobinQueue")) {
-            if (station.queue.isEmpty())
-                return 5;
-            else
-                return Integer.MAX_VALUE;
-        } else {
-            return station.getTotalWaitingTime();
+    
+    // Helper: format the customer IDs string to fixed width.
+    public static String formatCustomerIDs(String ids, int width) {
+        String[] parts = ids.split(" ");
+        StringBuilder result = new StringBuilder();
+        StringBuilder line = new StringBuilder();
+        for (String part : parts) {
+            if (line.length() + part.length() + 1 > width) {
+                result.append(line.toString().trim()).append("\n");
+                line = new StringBuilder();
+            }
+            line.append(part).append(" ");
         }
+        result.append(line.toString().trim());
+        return result.toString();
     }
-
-    // Determine the next quickest service station for a new customer.
-    // It considers only stations that are "available" (RoundRobinQueue only if
-    // empty; SingleQueue only if <15).
-    // It first finds the minimum queue size among available stations.
-    // If ShortestQueue's size equals that minimum, it is chosen.
-    // Otherwise, it returns the station among available ones with the lowest
-    // estimated waiting time.
+    
+    // Estimated waiting time: if station is empty, return 5; otherwise (# customers * 5).
+    public static int estimatedWaitingTime(ServiceStationType station) {
+        int n = station.queue.size();
+        return (n == 0) ? 5 : n * 5;
+    }
+    
+    // Determine the next quickest station among available ones.
     public static ServiceStationType nextQuickestStationForNewCustomer() {
-        int minSize = Integer.MAX_VALUE;
+        List<ServiceStationType> available = new ArrayList<>();
         for (ServiceStationType s : serviceStations) {
-            if (s.name.equals("RoundRobinQueue") && !s.queue.isEmpty())
+            if ((s.name.equals("SingleQueue") || s.name.equals("RoundRobinQueue")) && s.queue.size() >= 5)
                 continue;
-            if (s.name.equals("SingleQueue") && s.queue.size() >= 15)
-                continue;
+            available.add(s);
+        }
+        if (available.isEmpty())
+            return null;
+        int minSize = Integer.MAX_VALUE;
+        for (ServiceStationType s : available) {
             minSize = Math.min(minSize, s.queue.size());
         }
-        ServiceStationType shortestQueue = getStation("ShortestQueue");
-        if (shortestQueue.queue.size() == minSize) {
-            return shortestQueue;
+        List<ServiceStationType> candidates = new ArrayList<>();
+        for (ServiceStationType s : available) {
+            if (s.queue.size() == minSize)
+                candidates.add(s);
         }
-        int minEst = Integer.MAX_VALUE;
         ServiceStationType best = null;
-        for (ServiceStationType s : serviceStations) {
-            if (s.name.equals("RoundRobinQueue") && !s.queue.isEmpty())
-                continue;
-            if (s.name.equals("SingleQueue") && s.queue.size() >= 15)
-                continue;
+        int minEst = Integer.MAX_VALUE;
+        for (ServiceStationType s : candidates) {
             int est = estimatedWaitingTime(s);
             if (est < minEst) {
                 minEst = est;
@@ -183,23 +234,21 @@ public class QueueSimulation {
         }
         return best;
     }
-
-    // Display the next quickest service station and update its frequency.
+    
+    // Display the next quickest station and update frequency.
     public static void displayNextQuickestServiceStation() {
         ServiceStationType best = nextQuickestStationForNewCustomer();
         if (best == null) {
             System.out.println("No station is available for new assignment according to the rules.");
         } else {
             int est = estimatedWaitingTime(best);
-            // Update frequency count.
             nextQuickestFrequency.put(best.name, nextQuickestFrequency.getOrDefault(best.name, 0) + 1);
-            System.out.println("Next quickest service station: " + best.name
-                    + " (Estimated waiting time: " + est + " minutes)");
+            System.out.println("Next quickest service station: " + best.name +
+                    " (Estimated waiting time: " + est + " minutes)");
         }
     }
-
-    // Display the most efficient service station (i.e. the one with highest
-    // frequency).
+    
+    // Display the most efficient station (by frequency).
     public static void displayMostEfficientServiceStation() {
         String mostEfficient = null;
         int maxCount = 0;
@@ -212,155 +261,193 @@ public class QueueSimulation {
         if (mostEfficient == null) {
             System.out.println("No station has been selected yet.");
         } else {
-            System.out.println("Most efficient service station (next quickest frequency): "
-                    + mostEfficient + " (" + maxCount + " times)");
+            System.out.println("Most efficient service station (next quickest frequency): " +
+                    mostEfficient + " (" + maxCount + " times)");
         }
     }
-
-    // Check if a station is available according to its rules.
+    
+    // Check if a station is available.
     public static boolean isAvailable(ServiceStationType station) {
-        if (station.name.equals("RoundRobinQueue"))
-            return station.queue.isEmpty();
-        if (station.name.equals("SingleQueue"))
-            return station.queue.size() < 15;
+        if (station.name.equals("SingleQueue") || station.name.equals("RoundRobinQueue"))
+            return station.queue.size() < 5;
         return true;
     }
-
-    // Display starting information.
+    
+    // Display initial simulation inputs (printed only once).
     public static void displayStartingInfo() {
-        System.out.println("The simulation will begin now, sit tight!.");
-        System.out.println("There are five service stations:");
-        System.out.println(
-                "1. A regular single queue that will serve 15 customers, service station will take customers from the front of the queue.");
-        System.out.println(
-                "2. A round robin queue where each time it will only take 5 customers, and will not take new round until the current 5 customer services are done.");
-        System.out.println("3. The queue will be assigned a new customer if it is the shortest.");
-        System.out.println(
-                "4. The remaining two queues will be assigned new customers randomly with no preference or priority.");
-        System.out.println("Initial Customer Batch: " + totalCustomerWaiting);
-        System.out.println("Total Customer Waiting Duration: " + (totalCustomerWaiting * 5) + " minutes");
+        System.out.println("\nWelcome to the Service Station Simulation!");
+        System.out.println("Initial Simulation Inputs:");
+        System.out.println("Total Duration: " + totalSimulationDuration.duration + " minutes");
+        System.out.println("Initial Waiting Customers: " + totalCustomerWaiting);
+        System.out.println("Average Service Rate: " + averageServiceRate + " minutes/per customer");
         System.out.println("First Customer Arrival Time: " + arrivalRate);
-        System.out.println("Average Service Rate: 5 minutes\n");
+        System.out.println("Average Waiting Time per Customer: 5 minutes\n");
     }
-
-    // New assignment method:
-    // First, assign as many new customers as possible to the next quickest station.
-    // Then assign any remaining customers using our fallback rules.
-    public static void assignNewBatch(List<CustomerType> newCustomers) {
-        ServiceStationType nextStation = nextQuickestStationForNewCustomer();
-        while (!newCustomers.isEmpty() && isAvailable(nextStation)) {
-            nextStation.queue.add(newCustomers.remove(0));
-            nextStation.numbersOfCustomers++;
+    
+    // Assignment: assign new customers based on the next quickest station.
+    // Returns the number of customers that remain unassigned.
+    public static int assignNewBatch(List<CustomerType> newCustomers) {
+        while (!newCustomers.isEmpty() && isAvailable(nextQuickestStationForNewCustomer())) {
+            ServiceStationType nextStation = nextQuickestStationForNewCustomer();
+            if (nextStation == null)
+                break;
+            while (!newCustomers.isEmpty() && isAvailable(nextStation)) {
+                nextStation.queue.add(newCustomers.remove(0));
+                nextStation.numbersOfCustomers++;
+            }
         }
-        // For any remaining customers, use previous rules.
-        // Rule 1: RoundRobinQueue.
+        // Fallback: assign to RoundRobinQueue if available.
         ServiceStationType rrQueue = getStation("RoundRobinQueue");
-        if (rrQueue.queue.isEmpty() && !newCustomers.isEmpty()) {
-            int toAssign = Math.min(5, newCustomers.size());
+        if (rrQueue.queue.size() < 5 && !newCustomers.isEmpty()) {
+            int toAssign = Math.min(5 - rrQueue.queue.size(), newCustomers.size());
             for (int i = 0; i < toAssign; i++) {
                 rrQueue.queue.add(newCustomers.remove(0));
                 rrQueue.numbersOfCustomers++;
             }
         }
-        // Rule 2: SingleQueue.
+        // Then assign to SingleQueue.
         ServiceStationType singleQueue = getStation("SingleQueue");
-        while (singleQueue.queue.size() < 15 && !newCustomers.isEmpty()) {
+        while (singleQueue.queue.size() < 5 && !newCustomers.isEmpty()) {
             singleQueue.queue.add(newCustomers.remove(0));
             singleQueue.numbersOfCustomers++;
         }
-        // Rule 3: For remaining new customers, assign based on overall minimum queue
-        // size.
+        // Finally, assign any remaining new customers to stations that are not full.
         while (!newCustomers.isEmpty()) {
             int minSize = Integer.MAX_VALUE;
             for (ServiceStationType s : serviceStations) {
+                if ((s.name.equals("SingleQueue") || s.name.equals("RoundRobinQueue")) && s.queue.size() >= 5)
+                    continue;
                 minSize = Math.min(minSize, s.queue.size());
             }
             List<ServiceStationType> candidates = new ArrayList<>();
             for (ServiceStationType s : serviceStations) {
+                if ((s.name.equals("SingleQueue") || s.name.equals("RoundRobinQueue")) && s.queue.size() >= 5)
+                    continue;
                 if (s.queue.size() == minSize)
                     candidates.add(s);
             }
+            if (candidates.isEmpty())
+                break;
             ServiceStationType fallback = candidates.get(new Random().nextInt(candidates.size()));
             fallback.queue.add(newCustomers.remove(0));
             fallback.numbersOfCustomers++;
         }
+        return newCustomers.size();
     }
-
-    // Process (serve) up to 1 customer per station.
-    public static void processCustomers() {
-        for (ServiceStationType station : serviceStations) {
-            int customersToProcess = Math.min(1, station.queue.size());
-            for (int i = 0; i < customersToProcess; i++) {
-                station.queue.poll();
-                station.numbersOfCustomers = Math.max(0, station.numbersOfCustomers - 1);
-            }
+    
+    // Display current system status in a formatted table.
+    public static void displayStatus(int unassigned) {
+        int systemWaitingTime = 0;
+        for (ServiceStationType s : serviceStations) {
+            systemWaitingTime += s.getDisplayWaitingTime();
         }
-    }
-
-    // Display current system status.
-    public static void displayStatus() {
-        int totalRemainingCustomers = 0;
-        int totalWaitingTimeSystem = 0;
-        System.out.println("\nCurrent System Status:");
+        
+        System.out.println("\n---------------------------------------------------------------------------------------------------------------------------------");
+        System.out.printf("%-18s | %-30s | %-30s | %-15s | %-15s\n",
+                          "Station", "Customers ID", "Waiting Time", "Max Length", "Occupancy Rate");
+        System.out.println("---------------------------------------------------------------------------------------------------------------------------------");
         for (ServiceStationType station : serviceStations) {
-            int stationRemaining = station.queue.size();
-            totalRemainingCustomers += stationRemaining;
-            int stationWaitingTime = station.getDisplayWaitingTime();
-            totalWaitingTimeSystem += stationWaitingTime;
-            System.out.println(station.name + " Customers ID: " + getQueueCustomerIDs(station.queue)
-                    + " | Total Waiting Time: " + stationWaitingTime + " minutes");
+            String customerIDs = formatCustomerIDs(getQueueCustomerIDs(station.queue), 30);
+            int waitingTime = station.getDisplayWaitingTime();
+            String waitingLabel = "Max Waiting Time: " + waitingTime + " min";
+            String maxLength;
+            if (station.name.equals("SingleQueue"))
+                maxLength = "5 people";
+            else if (station.name.equals("RoundRobinQueue"))
+                maxLength = "5 people";
+            else
+                maxLength = "∞";
+            double occupancy = (systemWaitingTime > 0) ? (waitingTime * 100.0 / systemWaitingTime) : 0.0;
+            System.out.printf("%-18s | %-30s | %-30s | %-15s | %-15s\n",
+                              station.name,
+                              customerIDs,
+                              waitingLabel,
+                              maxLength,
+                              String.format("%-15s", String.format("%.2f%%", occupancy)));
         }
-        System.out.println("Total Waiting Customers in System: " + totalRemainingCustomers);
-        System.out.println("Total Waiting Time for the System: " + totalWaitingTimeSystem + " minutes");
+        System.out.println("---------------------------------------------------------------------------------------------------------------------------------");
+        System.out.println("On all service stations, Average Waiting Time of Each Customer: 5 minutes");
+        
+        int totalWaitingCustomers = 0;
+        for (ServiceStationType s : serviceStations) {
+            totalWaitingCustomers += s.queue.size();
+        }
+        System.out.println("Total Waiting Customers in System: " + totalWaitingCustomers);
+        if (unassigned > 0)
+            System.out.println("Remaining Unassigned Customers: " + unassigned);
+        System.out.println("Total Duration of the Simulation: " + accumulatedSimTime + " minutes");
     }
-
-    // Each simulation round: generate a new batch, allow user input for
-    // continuation,
-    // display next quickest station, pause 2 seconds, assign new customers,
-    // process, and display status.
+    
+    // Simulation loop.
     public static void simulate() {
         Random rand = new Random();
-        while (true) {
-            System.out.println(
-                    "\nPress any key to continue simulation, type 0 to exit, or type 1 to display the most efficient service station:");
+        currentArrivalTime = arrivalRate;
+        while (simulationRound <= totalSimulationDuration.duration) {
+            // Generate a random round duration (1 to 10 minutes).
+            DurationType roundDuration = DurationType.randomRoundDuration();
+            accumulatedSimTime += roundDuration.duration;
+            currentArrivalTime = TimeType.addMinutes(currentArrivalTime, roundDuration.duration);
+            
+            System.out.println("\nPress any key to continue simulation, type 0 to exit, or type 1 to display the most efficient service station:");
             String input = scanner.next();
             if (input.equals("0"))
                 break;
             if (input.equals("1")) {
                 displayMostEfficientServiceStation();
-                continue; // Prompt again.
+                continue;
             }
-
+            
+            // Print current round's customer arrival time.
+            System.out.println("This simulation Customer Arrival Time: " + currentArrivalTime);
             displayNextQuickestServiceStation();
-            // Sleep for 2 seconds.
             try {
                 Thread.sleep(2000);
             } catch (InterruptedException e) {
-                // Ignore interruption.
+                // Ignore.
             }
-
-            int numNewCustomers = rand.nextInt(15) + 1; // New customers per round (1 to 15)
+            
+            // Generate new customers based on round duration:
+            // On average, 1 customer every 2 minutes => ceil(roundDuration/2).
+            int numNewCustomers = (int) Math.ceil(roundDuration.duration / 2.0);
             List<CustomerType> newCustomers = new ArrayList<>();
             for (int i = 0; i < numNewCustomers; i++) {
                 CustomerType customer = new CustomerType();
                 customer.ID = ID++;
-                customer.arrivalT = new TimeType(arrivalRate.hours, arrivalRate.minutes, arrivalRate.seconds);
+                customer.arrivalT = new TimeType(currentArrivalTime.hours, currentArrivalTime.minutes, currentArrivalTime.seconds);
                 customer.waitingTime = new DurationType(5);
-                customer.serviceT = DurationType.randomServiceDuration();
+                customer.serviceT = DurationType.randomServiceDuration(averageServiceRate);
                 newCustomers.add(customer);
             }
-
-            assignNewBatch(newCustomers);
-            processCustomers();
-            displayStatus();
+            
+            int unassigned = assignNewBatch(newCustomers);
+            displayStatus(unassigned);
+            simulationRound++;
         }
     }
-
+    
     public static void main(String[] args) {
-        // Initialize frequency map for each station.
+        Random rand = new Random();
+        totalSimulationDuration = DurationType.randomSimulationDuration();  // 30-120 minutes
+        totalDurationInput = totalSimulationDuration.duration;
+        int avgWaiting = totalDurationInput / 2;
+        totalCustomerWaiting = rand.nextInt((avgWaiting / 2) + 1) + avgWaiting - (avgWaiting / 4);
+        if(totalCustomerWaiting < 1)
+            totalCustomerWaiting = 1;
+        // Adjust average service rate to be much higher than 5 * arrival rate (to crowd the system).
+        averageServiceRate = rand.nextInt(21) + 20;  // between 20 and 40 minutes
+
+        
+        List<Thread> stationThreads = new ArrayList<>();
+        for (ServiceStationType station : serviceStations) {
+            ServiceStationThread thread = new ServiceStationThread(station, 3000);
+            thread.start();
+            stationThreads.add(thread);
+        }
+        
         for (ServiceStationType s : serviceStations) {
             nextQuickestFrequency.put(s.name, 0);
         }
+        
         displayStartingInfo();
         List<CustomerType> initialCustomers = new ArrayList<>();
         for (int i = 0; i < totalCustomerWaiting; i++) {
@@ -368,10 +455,14 @@ public class QueueSimulation {
             customer.ID = ID++;
             customer.arrivalT = new TimeType(arrivalRate.hours, arrivalRate.minutes, arrivalRate.seconds);
             customer.waitingTime = new DurationType(5);
-            customer.serviceT = DurationType.randomServiceDuration();
+            customer.serviceT = DurationType.randomServiceDuration(averageServiceRate);
             initialCustomers.add(customer);
         }
         assignNewBatch(initialCustomers);
         simulate();
+        
+        for (Thread t : stationThreads) {
+            t.interrupt();
+        }
     }
 }
